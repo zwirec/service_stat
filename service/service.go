@@ -36,10 +36,12 @@ func NewService(port string) *Service {
 	return &Service{port: port, srv: &http.Server{Addr: ":" + port},
 		dbinfo: map[string]string{
 			"engine":   "",
+			"host":     "",
+			"port":     "",
 			"username": "",
 			"pass":     "",
 			"dbname":   "",
-			"port":     ""}}
+		}}
 }
 func (s *Service) Run() (err error) {
 
@@ -69,10 +71,16 @@ func (s *Service) Run() (err error) {
 }
 
 func (s *Service) connectToDB(info dbInfo) (err error) {
-	str := fmt.Sprintf("postgresql://localhost/%s?user=%s&password=%s&port=%s&sslmode=disable",
-		s.dbinfo["dbname"], s.dbinfo["username"], s.dbinfo["pass"], s.dbinfo["port"])
+	str := fmt.Sprintf("%s://%s/%s?user=%s&password=%s&port=%s&sslmode=disable",
+		s.dbinfo["engine"],
+		s.dbinfo["host"],
+		s.dbinfo["dbname"],
+		s.dbinfo["username"],
+		s.dbinfo["pass"],
+		s.dbinfo["port"])
 
 	s.db, err = sqlx.Connect(s.dbinfo["engine"], str)
+
 	if err != nil {
 		return errors.New("Failed connection to database")
 	}
@@ -114,7 +122,10 @@ func (s *Service) registerUsers(w http.ResponseWriter, req *http.Request) {
 
 		defer req.Body.Close()
 
-		row, err := s.db.Exec("INSERT INTO users VALUES ($1, $2, $3)", values["id"], values["age"], values["sex"])
+		row, err := s.db.Exec("INSERT INTO users VALUES ($1, $2, $3)",
+							values["id"],
+							values["age"],
+							values["sex"])
 
 		if err != nil {
 			s.writeResponse(w, "This ID already exist!", http.StatusBadRequest)
@@ -167,10 +178,10 @@ func (s *Service) getStat(w http.ResponseWriter, req *http.Request) {
        										ORDER BY COUNT DESC) t
 										WHERE rank < $4
 										ORDER BY TIME ,rank ASC;`,
-			params["date1"][0],
-			params["date2"][0],
-			params["action"][0],
-			params["limit"][0])
+										params["date1"][0],
+										params["date2"][0],
+										params["action"][0],
+										params["limit"][0])
 
 		defer rows.Close()
 
@@ -246,7 +257,10 @@ func (s *Service) addStat(w http.ResponseWriter, req *http.Request) {
 
 		defer req.Body.Close()
 
-		_, err := s.db.Exec("INSERT INTO stats VALUES ($1, $2, $3)", values["user"], values["action"], values["ts"])
+		_, err := s.db.Exec("INSERT INTO stats VALUES ($1, $2, $3)",
+							values["user"],
+							values["action"],
+							values["ts"])
 
 		if err != nil {
 			s.writeResponse(w, nil, http.StatusInternalServerError)
