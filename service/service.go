@@ -1,22 +1,21 @@
 package service
 
 import (
-	"net/http"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
-	"encoding/json"
 	"io/ioutil"
-	"fmt"
 	"log"
-	"strconv"
-	"errors"
-	"sync"
+	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
-	"syscall"
-	"net/url"
-	"time"
 	"sort"
+	"sync"
+	"syscall"
+	"time"
 )
 
 const (
@@ -27,15 +26,20 @@ const (
 type dbInfo map[string]string
 
 type Service struct {
-	port   int
+	port   string
 	srv    *http.Server
 	db     *sqlx.DB
 	dbinfo dbInfo
 }
 
-func NewService(port int) *Service {
-	return &Service{port: port, srv: &http.Server{Addr: ":" + strconv.Itoa(port)},
-		dbinfo: map[string]string{"engine": "", "username": "", "pass": "", "dbname": "", "port": "5432"}}
+func NewService(port string) *Service {
+	return &Service{port: port, srv: &http.Server{Addr: ":" + port},
+		dbinfo: map[string]string{
+			"engine":   "",
+			"username": "",
+			"pass":     "",
+			"dbname":   "",
+			"port":     ""}}
 }
 func (s *Service) Run() (err error) {
 
@@ -67,6 +71,7 @@ func (s *Service) Run() (err error) {
 func (s *Service) connectToDB(info dbInfo) (err error) {
 	str := fmt.Sprintf("postgresql://localhost/%s?user=%s&password=%s&port=%s&sslmode=disable",
 		s.dbinfo["dbname"], s.dbinfo["username"], s.dbinfo["pass"], s.dbinfo["port"])
+
 	s.db, err = sqlx.Connect(s.dbinfo["engine"], str)
 	if err != nil {
 		return errors.New("Failed connection to database")
@@ -102,12 +107,17 @@ func (s *Service) registerUsers(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 
+		if err := s.validatePOSTregisterParams(values); err != nil {
+			s.writeResponse(w, err, http.StatusBadRequest)
+			return
+		}
+
 		defer req.Body.Close()
 
 		row, err := s.db.Exec("INSERT INTO users VALUES ($1, $2, $3)", values["id"], values["age"], values["sex"])
 
 		if err != nil {
-			s.writeResponse(w, "This ID already exist!", http.StatusInternalServerError)
+			s.writeResponse(w, "This ID already exist!", http.StatusBadRequest)
 			return
 		}
 
@@ -130,7 +140,7 @@ func (s *Service) getStat(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 
-		err = s.validateParams(params)
+		err = s.validateGETParams(params)
 
 		if err != nil {
 			s.writeResponse(w, err.Error(), http.StatusBadRequest)
@@ -144,21 +154,23 @@ func (s *Service) getStat(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 
-		rows, err := s.db.Query(`SELECT time, id, age, sex, count
-FROM (
-       SELECT
-         users.*,
-         count(stats.*),
-         cast(stats.time AS DATE),
-         row_number() OVER (PARTITION BY time ORDER BY count(stats.*) DESC) AS rank
-       FROM stats, users
-       WHERE cast(time AS DATE) > cast($1 AS DATE) AND
-             cast(time AS DATE) < cast($2 AS DATE) AND
-             action = $3 AND users.id = stats.user
-       GROUP BY users.id, stats.time
-       ORDER BY count DESC) t
-WHERE rank < $4
-ORDER BY time ,rank ASC;`, params["date1"][0], params["date2"][0], params["action"][0], params["limit"][0])
+		rows, err := s.db.Query(`SELECT time, id, age, sex, count FROM (
+											SELECT users.*,
+         									  COUNT(stats.*),
+         									  CAST(stats.time AS DATE),
+         									  row_number() OVER (PARTITION BY TIME ORDER BY COUNT(stats.*) DESC) AS rank
+       										FROM stats, users
+       										WHERE CAST(time AS DATE) > CAST($1 AS DATE) AND
+             									  CAST(time AS DATE) < CAST($2 AS DATE) AND
+             									  action = $3 AND users.id = stats.user
+       										GROUP BY users.id, stats.time
+       										ORDER BY COUNT DESC) t
+										WHERE rank < $4
+										ORDER BY TIME ,rank ASC;`,
+			params["date1"][0],
+			params["date2"][0],
+			params["action"][0],
+			params["limit"][0])
 
 		defer rows.Close()
 
@@ -227,16 +239,14 @@ func (s *Service) addStat(w http.ResponseWriter, req *http.Request) {
 
 		var values map[string]interface{}
 
-		err := decoder.Decode(&values)
-
-		if err != nil {
+		if err := decoder.Decode(&values); err != nil {
 			s.writeResponse(w, "Incorrect JSON format!\n Try again\n", http.StatusBadRequest)
 			return
 		}
 
 		defer req.Body.Close()
 
-		_, err = s.db.Exec("INSERT INTO stats VALUES ($1, $2, $3)", values["user"], values["action"], values["ts"])
+		_, err := s.db.Exec("INSERT INTO stats VALUES ($1, $2, $3)", values["user"], values["action"], values["ts"])
 
 		if err != nil {
 			s.writeResponse(w, nil, http.StatusInternalServerError)
@@ -271,13 +281,21 @@ func (s Service) handler(c chan os.Signal) {
 	}
 }
 
-func (s *Service) validateParams(params url.Values) error {
+func (s *Service) validatePOSTregisterParams(params map[string]interface{}) error {
+
+	if params["id"] == nil || params["age"] == nil || params["sex"] == nil || len(params) != 3 {
+		return errors.New(`Missing one or more parameters or parameters invalid (use "id", "age" and "sex")`)
+	}
+	return nil
+}
+
+func (s *Service) validateGETParams(params url.Values) error {
 
 	if params["date1"] == nil || params["date2"] == nil || params["action"] == nil || params["limit"] == nil {
 		return errors.New(fmt.Sprintf("Incorrect number of params (have %d, must 4)", len(params)))
 	}
 
-	if !s.isValidCategoryStat(string(params["action"][0])) {
+	if !s.isValidStatCategory(string(params["action"][0])) {
 		return errors.New(fmt.Sprintf(`Action "%s" isn't support
 Please, give the correct action ("login", "logout", "like" or "commentary"`,
 			params["action"][0]))
@@ -286,7 +304,7 @@ Please, give the correct action ("login", "logout", "like" or "commentary"`,
 	return nil
 }
 
-func (s *Service) isValidCategoryStat(category string) bool {
+func (s *Service) isValidStatCategory(category string) bool {
 	switch category {
 	case
 		"login",
