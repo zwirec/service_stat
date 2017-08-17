@@ -1,17 +1,41 @@
 [
   {
     "test": {
-      "user": "3",
-      "action": "login",
+      "user": "1",
+      "action": "like",
       "ts": "2017-01-03T14:32:34"
     },
     "expected": 200
   },
   {
     "test": {
-      "user": "5",
+      "user": "1",
       "action": "like",
-      "sex": "2017-02-01T14:32:34"
+      "sex": "2017-01-03T14:32:34"
+    },
+    "expected": 200
+  },
+  {
+    "test": {
+      "user": "2",
+      "action": "like",
+      "sex": "2017-01-04T14:32:34"
+    },
+    "expected": 200
+  }
+  {
+    "test": {
+      "user": "2",
+      "action": "like",
+      "sex": "2017-01-04T14:32:34"
+    },
+    "expected": 200
+  },
+  {
+    "test": {
+      "user": "3",
+      "action": "like",
+      "sex": "2017-01-04T14:32:34"
     },
     "expected": 200
   }

@@ -109,10 +109,6 @@ func TestGetStat(t *testing.T) {
 
 	for _, request := range JSON {
 
-		//var stats []byte
-
-		//stats, err := json.Marshal(request["test"])
-
 		params := url.Values{}
 
 		test := request["test"].(map[string]interface{})

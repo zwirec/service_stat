@@ -1,18 +1,18 @@
 [
   {
     "test": {
-      "id": "9999999",
+      "id": "1",
       "age": "20",
       "sex": "M"
     },
-    "expected": 400
+    "expected": 200
   },
   {
     "test": {
-      "id": "1",
+      "id": "2",
       "age": "18",
       "sex": "F"
     },
-    "expected": 400
+    "expected": 200
   }
 ]
