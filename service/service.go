@@ -11,7 +11,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
-	"../requestHandler"
+	"github.com/zwirec/http_service_stat/requestHandler"
 )
 
 const (

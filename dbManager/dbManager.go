@@ -1,17 +1,16 @@
 package dbManager
 
 import (
-	"github.com/jmoiron/sqlx"
+	_ "github.com/lib/pq"
 	"fmt"
 	"database/sql"
-	"log"
 	"net/url"
 )
 
 type DBInfo map[string]string
 
 type DBManager struct {
-	db *sqlx.DB
+	DB *sql.DB
 }
 
 func NewDBManager(dbinfo map[string]string) (*DBManager, error) {
@@ -23,18 +22,18 @@ func NewDBManager(dbinfo map[string]string) (*DBManager, error) {
 		dbinfo["pass"],
 		dbinfo["port"])
 
-	db, err := sqlx.Open(dbinfo["engine"], str)
+	db, err := sql.Open(dbinfo["engine"], str)
 
 	if err != nil {
 		return nil, err
 	}
 
-	return &DBManager{db: db}, nil
+	return &DBManager{DB: db}, nil
 }
 
 func (dbm *DBManager) CreateUser(values map[string]interface{}) (sql.Result, error) {
 
-	result, err := dbm.db.Exec(`INSERT INTO users VALUES ($1, $2, $3) 
+	result, err := dbm.DB.Exec(`INSERT INTO users VALUES ($1, $2, $3)
 							ON CONFLICT ON CONSTRAINT table_name_pkey DO NOTHING;`,
 		values["id"],
 		values["age"],
@@ -49,11 +48,11 @@ func (dbm *DBManager) CreateUser(values map[string]interface{}) (sql.Result, err
 
 func (dbm *DBManager) GetStats(values url.Values) (*sql.Rows, error) {
 
-	rows, err := dbm.db.Query(`SELECT
+	rows, err := dbm.DB.Query(`SELECT
   date,
   id,
   age,
-  cast(sex as VARCHAR(1)),
+  cast(sex AS VARCHAR(1)),
   cnt
 FROM (
        SELECT
@@ -83,14 +82,12 @@ ORDER BY date, cnt DESC;`,
 
 func (dbm *DBManager) PutStats(values map[string]interface{}) (sql.Result, error) {
 
-	result, err := dbm.db.Exec(`INSERT INTO stats ("user", action, date) VALUES ($1, $2, $3)
+	result, err := dbm.DB.Exec(`INSERT INTO stats ("user", action, date) VALUES ($1, $2, $3)
 									  ON CONFLICT ON CONSTRAINT user_time_uniq
   									  DO UPDATE SET cnt = stats.cnt + 1;`,
 		values["user"],
 		values["action"],
 		values["ts"])
-
-	log.Print(err)
 
 	if err != nil {
 		return nil, err

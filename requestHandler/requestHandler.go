@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"net/url"
-	"../dbManager"
+	"github.com/zwirec/http_service_stat/dbManager"
 	"log"
 	"errors"
 	"time"
@@ -18,7 +18,7 @@ const (
 )
 
 type RequestHandler struct {
-	dbmanager *dbManager.DBManager
+	DBManager *dbManager.DBManager
 	logger    *log.Logger
 }
 
@@ -28,7 +28,7 @@ func NewHandler(dbinfo map[string]string, logger ... *log.Logger) (*RequestHandl
 		return nil, err
 	}
 	r := &RequestHandler{}
-	r.dbmanager = dbm
+	r.DBManager = dbm
 
 	if logger == nil {
 		r.logger = log.New(os.Stdout, "", log.LstdFlags)
@@ -40,14 +40,15 @@ func NewHandler(dbinfo map[string]string, logger ... *log.Logger) (*RequestHandl
 }
 
 func (reqHandler *RequestHandler) RegisterHandleFunc() error {
-	http.HandleFunc("/api/users", reqHandler.registerUsers)
-	http.HandleFunc("/api/users/stats", reqHandler.addStat)
-	http.HandleFunc("/api/users/stats/top", reqHandler.getStat)
+	http.HandleFunc("/api/users", reqHandler.RegisterUsers)
+	http.HandleFunc("/api/users/stats", reqHandler.AddStat)
+	http.HandleFunc("/api/users/stats/top", reqHandler.GetStat)
 	return nil
 }
 
-func (reqHandler *RequestHandler) addStat(w http.ResponseWriter, req *http.Request) {
+func (reqHandler *RequestHandler) AddStat(w http.ResponseWriter, req *http.Request) {
 	var httpStatus int
+
 	if req.Method == "POST" {
 
 		decoder := json.NewDecoder(req.Body)
@@ -61,9 +62,16 @@ func (reqHandler *RequestHandler) addStat(w http.ResponseWriter, req *http.Reque
 			return
 		}
 
+		if err := validatePOSTaddStatParams(values); err != nil {
+			httpStatus = http.StatusBadRequest
+			reqHandler.writeResponse(w, err.Error(), httpStatus)
+			reqHandler.logger.Printf(`%s "%s %s %s %d"`, req.RemoteAddr, req.Method, req.URL.Path, req.Proto, httpStatus)
+			return
+		}
+
 		defer req.Body.Close()
 
-		_, err := reqHandler.dbmanager.PutStats(values)
+		_, err := reqHandler.DBManager.PutStats(values)
 
 		if err != nil {
 			httpStatus = http.StatusInternalServerError
@@ -72,13 +80,6 @@ func (reqHandler *RequestHandler) addStat(w http.ResponseWriter, req *http.Reque
 			return
 		}
 
-
-		if err != nil {
-			httpStatus = http.StatusInternalServerError
-			reqHandler.writeResponse(w, nil, httpStatus)
-			reqHandler.logger.Printf(`%s "%s %s %s %d"`, req.RemoteAddr, req.Method, req.URL.Path, req.Proto, httpStatus)
-			return
-		}
 	} else {
 		httpStatus = http.StatusMethodNotAllowed
 		reqHandler.writeResponse(w, nil, httpStatus)
@@ -88,10 +89,9 @@ func (reqHandler *RequestHandler) addStat(w http.ResponseWriter, req *http.Reque
 	return
 }
 
-func (reqHandler *RequestHandler) registerUsers(w http.ResponseWriter, req *http.Request) {
+func (reqHandler *RequestHandler) RegisterUsers(w http.ResponseWriter, req *http.Request) {
 	var httpStatus int
 
-	defer reqHandler.logger.Printf(`%s "%s %s %s %d"`, req.RemoteAddr, req.Method, req.URL.Path, req.Proto, httpStatus)
 	if req.Method == "POST" {
 
 		decoder := json.NewDecoder(req.Body)
@@ -114,7 +114,7 @@ func (reqHandler *RequestHandler) registerUsers(w http.ResponseWriter, req *http
 			return
 		}
 
-		if !reqHandler.isValidSex(values["sex"].(string)) {
+		if !isValidSex(values["sex"].(string)) {
 			httpStatus = http.StatusBadRequest
 			reqHandler.writeResponse(w, nil, httpStatus)
 			reqHandler.logger.Printf(`%s "%s %s %s %d"`, req.RemoteAddr, req.Method, req.URL.Path, req.Proto, httpStatus)
@@ -123,10 +123,10 @@ func (reqHandler *RequestHandler) registerUsers(w http.ResponseWriter, req *http
 
 		defer req.Body.Close()
 
-		_, err = reqHandler.dbmanager.CreateUser(values)
+		_, err = reqHandler.DBManager.CreateUser(values)
 
 		if err != nil {
-			httpStatus = http.StatusBadRequest
+			httpStatus = http.StatusInternalServerError
 			reqHandler.writeResponse(w, err.Error(), httpStatus)
 			reqHandler.logger.Printf(`%s "%s %s %s %d"`, req.RemoteAddr, req.Method, req.URL.Path, req.Proto, httpStatus)
 			return
@@ -143,6 +143,13 @@ func (reqHandler *RequestHandler) registerUsers(w http.ResponseWriter, req *http
 	}
 }
 
+func validatePOSTaddStatParams(params map[string]interface{}) error {
+	if params["user"] == nil || params["action"] == nil || params["ts"] == nil || !isValidStatCategory(params["action"].(string)) {
+		return fmt.Errorf(`Missing one or more parameters or parameters invalid (use "id", "age" and "sex")`)
+	}
+	return nil
+}
+
 func (reqHanlder *RequestHandler) validatePOSTregisterParams(params map[string]interface{}) error {
 
 	if params["id"] == nil || params["age"] == nil || params["sex"] == nil || len(params) != 3 {
@@ -151,10 +158,8 @@ func (reqHanlder *RequestHandler) validatePOSTregisterParams(params map[string]i
 	return nil
 }
 
-func (reqHandler *RequestHandler) getStat(w http.ResponseWriter, req *http.Request) {
+func (reqHandler *RequestHandler) GetStat(w http.ResponseWriter, req *http.Request) {
 	var httpStatus int
-
-	//defer reqHandler.logger.Printf(`%s "%s %s %s %d"`, req.RemoteAddr, req.Method, req.URL.Path, req.Proto, httpStatus)
 
 	if req.Method == "GET" {
 
@@ -167,9 +172,7 @@ func (reqHandler *RequestHandler) getStat(w http.ResponseWriter, req *http.Reque
 			return
 		}
 
-		err = reqHandler.validateGETParams(values)
-
-		if err != nil {
+		if err = reqHandler.validateGETParams(values); err != nil {
 			httpStatus = http.StatusBadRequest
 			reqHandler.writeResponse(w, err.Error(), httpStatus)
 			reqHandler.logger.Printf(`%s "%s %s %s %d"`, req.RemoteAddr, req.Method, req.URL.Path, req.Proto, httpStatus)
@@ -178,11 +181,12 @@ func (reqHandler *RequestHandler) getStat(w http.ResponseWriter, req *http.Reque
 
 		result := map[string][]map[string]interface{}{}
 
-		rows, err := reqHandler.dbmanager.GetStats(values)
+		rows, err := reqHandler.DBManager.GetStats(values)
 
 		if err != nil {
 			httpStatus = http.StatusInternalServerError
-			reqHandler.writeResponse(w, nil, httpStatus)
+			reqHandler.writeResponse(w, err, httpStatus)
+			log.Println(err)
 			reqHandler.logger.Printf(`%s "%s %s %s %d"`, req.RemoteAddr, req.Method, req.URL.Path, req.Proto, httpStatus)
 			return
 		}
@@ -242,7 +246,7 @@ func (reqHandler *RequestHandler) getStat(w http.ResponseWriter, req *http.Reque
 		reqHandler.writeResponse(w, string(data)+"\n", httpStatus)
 		reqHandler.logger.Printf(`%s "%s %s %s %d"`, req.RemoteAddr, req.Method, req.URL.Path, req.Proto, httpStatus)
 	} else {
-		httpStatus = http.StatusOK
+		httpStatus = http.StatusMethodNotAllowed
 		reqHandler.writeResponse(w, nil, httpStatus)
 		reqHandler.logger.Printf(`%s "%s %s %s %d"`, req.RemoteAddr, req.Method, req.URL.Path, req.Proto, httpStatus)
 	}
@@ -254,7 +258,7 @@ func (reqHandler *RequestHandler) validateGETParams(params url.Values) error {
 		return fmt.Errorf("Incorrect number of params (have %d, must 4)", len(params))
 	}
 
-	if !reqHandler.isValidStatCategory(params["action"][0]) {
+	if !isValidStatCategory(params["action"][0]) {
 		return fmt.Errorf("Incorrect value(s)")
 	}
 
@@ -273,7 +277,7 @@ func (reqHandler *RequestHandler) writeResponse(w http.ResponseWriter, data inte
 	return nil
 }
 
-func (reqHandler *RequestHandler) isValidStatCategory(category string) bool {
+func isValidStatCategory(category string) bool {
 	switch category {
 	case
 		"login",
@@ -285,7 +289,7 @@ func (reqHandler *RequestHandler) isValidStatCategory(category string) bool {
 	return false
 }
 
-func (reqHandler *RequestHandler) isValidSex(sex string) bool {
+func isValidSex(sex string) bool {
 	if !(sex == "M" || sex == "F") {
 		return false
 	}

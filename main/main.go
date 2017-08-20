@@ -1,7 +1,7 @@
 package main
 
 import (
-	"../service"
+	"github.com/zwirec/http_service_stat/service"
 	"log"
 	"os"
 )
