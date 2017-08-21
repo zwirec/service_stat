@@ -26,12 +26,18 @@ CREATE INDEX IF NOT EXISTS users_id_age_sex_idx
 
 CREATE TABLE IF NOT EXISTS stats
 (
-  user   INTEGER
+  "user" INTEGER
     CONSTRAINT stats_users_id_fk
     REFERENCES users,
-  action VARCHAR(64),
-  time   TIMESTAMP
+  action ACTION,
+  date   DATE,
+  cnt    INTEGER DEFAULT 1,
+  CONSTRAINT user_time_uniq
+  UNIQUE (user, date)
 );
+
+CREATE INDEX stats_time_idx
+  ON stats (date);
 
 CREATE INDEX IF NOT EXISTS stats_time_idx
   ON stats (time);
